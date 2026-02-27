@@ -323,7 +323,7 @@ export default function VehicleHeader({ onOpenCharging, onOpenTelemetry }) {
         <div className="relative hidden md:block">
           <button
             onClick={() => setToolsOpen(!toolsOpen)}
-            title="Tools"
+            title={t("dashboard:tools")}
             className="flex items-center gap-2 px-3 h-9 bg-white text-gray-600 hover:text-indigo-600 hover:border-indigo-200 border border-gray-200 rounded-full transition-all-custom shadow-sm tap-active cursor-pointer"
           >
             <svg
@@ -339,7 +339,7 @@ export default function VehicleHeader({ onOpenCharging, onOpenTelemetry }) {
                 d="M4 6h16M4 12h16M4 18h16"
               />
             </svg>
-            <span className="text-xs font-bold">Tools</span>
+            <span className="text-xs font-bold">{t("dashboard:tools")}</span>
             <svg
               className={`w-3 h-3 transition-transform ${toolsOpen ? "rotate-180" : ""}`}
               fill="none"
@@ -385,9 +385,9 @@ export default function VehicleHeader({ onOpenCharging, onOpenTelemetry }) {
                     </svg>
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-gray-900">Deep Scan</p>
+                    <p className="text-sm font-bold text-gray-900">{t("dashboard:deepScan")}</p>
                     <p className="text-[10px] text-gray-400">
-                      Full telemetry data
+                      {t("dashboard:deepScanDesc")}
                     </p>
                   </div>
                 </button>
@@ -418,10 +418,10 @@ export default function VehicleHeader({ onOpenCharging, onOpenTelemetry }) {
                   </div>
                   <div>
                     <p className="text-sm font-bold text-gray-900">
-                      Charging History
+                      {t("dashboard:chargingHistory")}
                     </p>
                     <p className="text-[10px] text-gray-400">
-                      All charging sessions
+                      {t("dashboard:chargingHistoryDesc")}
                     </p>
                   </div>
                 </button>
