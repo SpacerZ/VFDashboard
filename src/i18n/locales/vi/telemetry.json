@@ -217,6 +217,9 @@
     "device_id": "ID thiết bị đã kết nối",
     "data_privacy": "Quyền riêng tư dữ liệu",
     "battery_leasing": "Thuê pin",
-    "service_status": "Dịch vụ kết nối"
+    "service_status": "Dịch vụ kết nối",
+    "owner_profile": "Hồ sơ chủ xe",
+    "primary_driver_profile": "Lái xe chính",
+    "secondary_driver_profile": "Lái xe phụ"
   }
 }

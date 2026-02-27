@@ -43,5 +43,14 @@
   "ready": "Ready",
   "export": "Export",
   "refreshing": "Refreshing...",
-  "updating": "Updating..."
+  "updating": "Updating...",
+  "currentUser": "Current User",
+  "yourVehicles": "Your Vehicles",
+  "roles": {
+    "MASTER_DRIVER": "Master Driver",
+    "OWNER": "Owner",
+    "SECONDARY_DRIVER": "Secondary Driver",
+    "FAMILY_MEMBER": "Family Member",
+    "GUEST": "Guest"
+  }
 }

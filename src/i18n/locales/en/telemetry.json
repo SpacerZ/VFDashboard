@@ -217,6 +217,9 @@
     "device_id": "Paired Device ID",
     "data_privacy": "Data Privacy",
     "battery_leasing": "Battery Leasing",
-    "service_status": "Connected Service"
+    "service_status": "Connected Service",
+    "owner_profile": "Owner Profile",
+    "primary_driver_profile": "Master Driver",
+    "secondary_driver_profile": "Secondary Driver"
   }
 }

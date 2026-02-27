@@ -1361,6 +1361,9 @@ export const DEEP_SCAN_GROUPS = {
       "DATA_PRIVACY_SETTING",
       "BATTERY_LEASING_STATUS",
       "CCARSERVICE_OBJECT_SERVICE_STATUS",
+      "CAPP_PAIRING_INFO_OWNER_PROFILE",
+      "CAPP_PAIRING_INFO_PRIMARY_DRIVER_PROFILE",
+      "CAPP_PAIRING_INFO_SECONDARY_DRIVER_PROFILE",
     ],
     fields: [
       {
@@ -1393,6 +1396,21 @@ export const DEEP_SCAN_GROUPS = {
         label: "Connected Service",
         format: "enum",
         enumMap: { 0: "Inactive", 1: "Active", 2: "Expired" },
+      },
+      {
+        key: "owner_profile",
+        label: "Owner Profile",
+        format: "string",
+      },
+      {
+        key: "primary_driver_profile",
+        label: "Master Driver",
+        format: "string",
+      },
+      {
+        key: "secondary_driver_profile",
+        label: "Secondary Driver",
+        format: "string",
       },
     ],
   },

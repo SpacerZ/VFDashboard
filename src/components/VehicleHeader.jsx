@@ -440,11 +440,14 @@ export default function VehicleHeader({ onOpenCharging, onOpenTelemetry }) {
             </p>
             <p className="text-xs text-gray-400 mt-0.5 font-medium tracking-wide">
               {vehicle.userVehicleType
-                ? vehicle.userVehicleType
-                    .replace("ROLE_", "")
-                    .toLowerCase()
-                    .replace(/_/g, " ")
-                    .replace(/\b\w/g, (c) => c.toUpperCase())
+                ? t(
+                    `common:roles.${vehicle.userVehicleType.replace("ROLE_", "")}`,
+                    vehicle.userVehicleType
+                      .replace("ROLE_", "")
+                      .toLowerCase()
+                      .replace(/_/g, " ")
+                      .replace(/\b\w/g, (c) => c.toUpperCase())
+                  )
                 : ""}
             </p>
           </div>
@@ -479,7 +482,7 @@ export default function VehicleHeader({ onOpenCharging, onOpenTelemetry }) {
                   {/* User Section */}
                   <div className="px-4 py-3 border-b border-gray-50 bg-gray-50/30">
                     <p className="text-[10px] font-extrabold text-blue-600 uppercase tracking-widest mb-1">
-                      Current User
+                      {t("common:currentUser")}
                     </p>
                     <div className="flex items-center gap-3">
                       <img
@@ -495,8 +498,11 @@ export default function VehicleHeader({ onOpenCharging, onOpenTelemetry }) {
                         </p>
                         <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">
                           {vehicle.userVehicleType
-                            ?.replace("ROLE_", "")
-                            .replace(/_/g, " ")}
+                            ? t(
+                                `common:roles.${vehicle.userVehicleType.replace("ROLE_", "")}`,
+                                vehicle.userVehicleType.replace("ROLE_", "").replace(/_/g, " ")
+                              )
+                            : ""}
                         </p>
                       </div>
                     </div>
@@ -506,7 +512,7 @@ export default function VehicleHeader({ onOpenCharging, onOpenTelemetry }) {
                   <div className="py-2">
                     <div className="px-4 py-1 mb-1">
                       <p className="text-[10px] font-extrabold text-gray-400 uppercase tracking-widest">
-                        Your Vehicles
+                        {t("common:yourVehicles")}
                       </p>
                     </div>
 

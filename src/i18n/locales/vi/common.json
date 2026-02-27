@@ -43,5 +43,14 @@
   "ready": "Sẵn sàng",
   "export": "Xuất",
   "refreshing": "Đang làm mới...",
-  "updating": "Đang cập nhật..."
+  "updating": "Đang cập nhật...",
+  "currentUser": "Người dùng hiện tại",
+  "yourVehicles": "Xe của bạn",
+  "roles": {
+    "MASTER_DRIVER": "Lái xe chính",
+    "OWNER": "Chủ xe",
+    "SECONDARY_DRIVER": "Lái xe phụ",
+    "FAMILY_MEMBER": "Thành viên gia đình",
+    "GUEST": "Khách"
+  }
 }
