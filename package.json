@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@astrojs/cloudflare": "^12.6.12",
-    "@astrojs/node": "^9.5.3",
+    "@astrojs/node": "^9.5.4",
     "@astrojs/react": "^4.4.2",
     "@nanostores/react": "^1.0.0",
     "@tailwindcss/vite": "^4.1.18",
@@ -46,5 +46,12 @@
     "react-i18next": "^16.5.4",
     "react-leaflet": "^5.0.0",
     "tailwindcss": "^4.1.18"
+
+  },
+  "overrides": {
+    "undici": ">=7.18.2",
+    "@astrojs/cloudflare": {
+      "wrangler": ">=4.59.1"
+    }
   }
 }
