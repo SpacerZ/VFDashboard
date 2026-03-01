@@ -1,9 +1,7 @@
 import { map, atom } from "nanostores";
 import { api } from "../services/api";
 import { DEFAULT_LOCATION } from "../constants/vehicle";
-// refreshTimerStore removed — MQTT is the sole data source, no REST polling.
 import { getMqttClient } from "../services/mqttClient";
-// list_resource registration removed — MQTT delivers data without it.
 
 export interface VehicleInfo {
   vinCode: string;
@@ -145,9 +143,11 @@ export interface VehicleState {
   debugLogByVin?: Record<string, any[]>;
 
   lastUpdated: number;
+  odoLastReceived?: number; // Timestamp when odometer value was last received from MQTT
   isRefreshing?: boolean;
   isInitialized?: boolean;
   isEnriching?: boolean; // True when fetching Location/Weather externally
+  dataSource?: "cache" | "live" | "none"; // Whether displayed data is from cache or live MQTT
 }
 
 // Demo Mode / Default State
@@ -250,9 +250,11 @@ export const vehicleStore = map<VehicleState>({
   debugLogByVin: {},
 
   lastUpdated: Date.now(),
+  odoLastReceived: undefined,
   isRefreshing: false,
   isInitialized: false,
   isEnriching: false,
+  dataSource: "none",
 });
 
 // Reactive version counter — bumped every time MQTT snapshot receives new data.
@@ -457,7 +459,6 @@ const getRawMqttTelemetry = (vin: string) => {
   return [...bucket.values()];
 };
 
-// buildRequestObjects and chunkList removed — no longer needed without list_resource.
 
 const LOCATION_ENRICH_TTL_MS = 3 * 60 * 1000;
 const LOCATION_ENRICH_DISTANCE_M = 500;
@@ -763,6 +764,103 @@ const parseBatteryCapacityKwh = (vehicleInfo: any): number | null => {
 };
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const TELEMETRY_STORAGE_PREFIX = "vf-telemetry-cache:";
+const TELEMETRY_STORAGE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// --- Persistent Telemetry Cache (survives page reload) ---
+
+const TELEMETRY_PERSIST_FIELDS: Array<keyof VehicleState> = [
+  "battery_level",
+  "range",
+  "speed",
+  "odometer",
+  "charging_status",
+  "remaining_charging_time",
+  "battery_health_12v",
+  "soh_percentage",
+  "tire_pressure_fl",
+  "tire_pressure_fr",
+  "tire_pressure_rl",
+  "tire_pressure_rr",
+  "tire_temp_fl",
+  "tire_temp_fr",
+  "tire_temp_rl",
+  "tire_temp_rr",
+  "latitude",
+  "longitude",
+  "outside_temp",
+  "inside_temp",
+  "gear_position",
+  "is_locked",
+  "door_fl",
+  "door_fr",
+  "door_rl",
+  "door_rr",
+  "trunk_status",
+  "hood_status",
+  "ignition_status",
+  "heading",
+  "battery_serial",
+  "battery_manufacture_date",
+  "battery_type",
+  "battery_nominal_capacity_kwh",
+  "target_soc",
+  "central_lock_status",
+  "handbrake_status",
+  "location_address",
+  "weather_address",
+  "weather_outside_temp",
+  "weather_code",
+  "odoLastReceived",
+];
+
+const saveTelemetryToStorage = (vin: string, data: Partial<VehicleState>) => {
+  if (typeof window === "undefined" || !vin) return;
+  try {
+    const payload: Record<string, any> = { _savedAt: Date.now() };
+    for (const key of TELEMETRY_PERSIST_FIELDS) {
+      const val = data[key];
+      if (val !== undefined && val !== null && val !== "" && val !== "--") {
+        payload[key] = val;
+      }
+    }
+    // Only save if we have at least some real telemetry
+    if (Object.keys(payload).length <= 1) return; // only _savedAt
+    window.localStorage.setItem(
+      TELEMETRY_STORAGE_PREFIX + vin,
+      JSON.stringify(payload),
+    );
+  } catch {
+    // quota exceeded or private browsing
+  }
+};
+
+const loadTelemetryFromStorage = (
+  vin: string,
+): (Partial<VehicleState> & { _savedAt?: number }) | null => {
+  if (typeof window === "undefined" || !vin) return null;
+  try {
+    const raw = window.localStorage.getItem(TELEMETRY_STORAGE_PREFIX + vin);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const savedAt = parsed._savedAt;
+    if (
+      typeof savedAt !== "number" ||
+      Date.now() - savedAt > TELEMETRY_STORAGE_TTL_MS
+    ) {
+      // Expired — remove
+      window.localStorage.removeItem(TELEMETRY_STORAGE_PREFIX + vin);
+      return null;
+    }
+
+    return parsed as Partial<VehicleState> & { _savedAt: number };
+  } catch {
+    return null;
+  }
+};
+
 const TELEMETRY_SIGNALS: Array<keyof VehicleState> = [
   "battery_level",
   "range",
@@ -782,14 +880,17 @@ const TELEMETRY_SIGNALS: Array<keyof VehicleState> = [
   "inside_temp",
 ];
 
-const hasTelemetryValues = (data: Partial<VehicleState> | undefined | null) => {
+const hasTelemetryValues = (
+  data: (Partial<VehicleState> & { _savedAt?: number }) | undefined | null,
+  ttlMs: number = CACHE_TTL_MS,
+) => {
   if (!data) return false;
 
-  const lastUpdated = data.lastUpdated;
+  const lastUpdated = data.lastUpdated || (data as any)?._savedAt;
   if (typeof lastUpdated !== "number" || !Number.isFinite(lastUpdated)) return false;
   const now = Date.now();
   if (lastUpdated > now + 5 * 60 * 1000) return false;
-  if (now - lastUpdated > CACHE_TTL_MS) return false;
+  if (now - lastUpdated > ttlMs) return false;
 
   return TELEMETRY_SIGNALS.some((key) => {
     const value = data[key];
@@ -854,32 +955,59 @@ export const switchVehicle = async (targetVin: string) => {
     return;
   }
 
+  // Sync api.vin so wakeup/appPing headers target the correct vehicle
+  api.vin = targetVin;
+
+  // Tell server this is now the active vehicle (APK does this on every switch).
+  // Must complete before MQTT reconnect so wakeup targets the correct T-Box.
+  try {
+    await api.setPrimaryVehicle(targetVin);
+  } catch {
+    // Non-fatal — continue with MQTT switch even if this fails
+  }
+
   // 2. Prepare Base State from Vehicle Info
   const baseState = getVehicleBaseState(vehicleInfo, current);
 
-  // 3. Hydrate from Cache if available
+  // 3. Hydrate from Cache if available (in-memory first, then localStorage)
   const cachedData = current.vehicleCache[targetVin] || {};
   const debugLogFromCache =
     current.debugLogByVin?.[targetVin] || cachedData.debugLog || [];
 
+  // Try localStorage persistent cache for telemetry that survives page reloads
+  const storedTelemetry = loadTelemetryFromStorage(targetVin);
+  const mergedCache = storedTelemetry
+    ? { ...storedTelemetry, ...cachedData } // in-memory cache wins over stored
+    : cachedData;
+
   // Only skip refresh when cache still has fresh, real telemetry values
-  const hasTelemetry = hasTelemetryValues(cachedData);
+  const hasTelemetry =
+    hasTelemetryValues(cachedData) ||
+    hasTelemetryValues(storedTelemetry, TELEMETRY_STORAGE_TTL_MS);
+
+  // Use stored timestamp as lastUpdated when no in-memory data exists
+  const lastUpdated = cachedData.lastUpdated ||
+    storedTelemetry?._savedAt ||
+    Date.now();
 
   // Merge: Current State -> Reset Telemetry -> Base State -> Cached Data
   vehicleStore.set({
     ...current,
     ...INITIAL_TELEMETRY,
     ...baseState,
-    ...cachedData,
+    ...mergedCache,
     vin: targetVin,
+    lastUpdated,
     debugLog: debugLogFromCache,
     isRefreshing: !hasTelemetry, // Only show loading if we don't have telemetry
+    dataSource: hasTelemetry ? "cache" : "none",
   });
 
   // Refresh external enrichment for this VIN only when coordinates changed or cache expired.
   refreshLocationWeatherForVin(targetVin, cachedData);
 
-  // 4. Switch MQTT subscription to new VIN (non-blocking — cached data already shown)
+  // 4. Switch MQTT to new VIN — server now knows this is the active vehicle,
+  //    so onConnected → wakeup/list_resource/app_ping will target correct T-Box.
   getMqttClient()
     .switchVin(targetVin)
     .catch((err) => console.warn("switchVehicle: MQTT switch failed", err));
@@ -913,7 +1041,7 @@ const DRAWER_MQTT_WAIT_MS = 5000; // Max wait for MQTT data when drawer is empty
  * getDeepScanData — "Read Forever" approach
  *
  * Reads from the MQTT snapshot that is populated as messages arrive.
- * No list_resource registration needed — MQTT delivers data automatically.
+ * Reads from the MQTT snapshot populated as messages arrive.
  *
  * Flow:
  * 1. Check 5-min store cache → return early if fresh
@@ -995,9 +1123,6 @@ function storeDeepScanSnapshot(vin: string, rawData: any[], timestamp: number) {
   vehicleStore.setKey("fullTelemetryData", newFullData);
   vehicleStore.setKey("fullTelemetryTimestamps", newTimestamps);
 }
-
-// accelerateRegistration, registerAllStaticAliases, smartDiscovery removed —
-// list_resource registration is no longer used. MQTT delivers data without it.
 
 /**
  * fetchFullTelemetry — backward-compatible wrapper around getDeepScanData.
@@ -1084,10 +1209,32 @@ export const updateFromMqtt = (
   ingestMqttTelemetry(vin, rawMessages || []);
   if (!vin || !parsedData || Object.keys(parsedData).length === 0) return;
 
-  updateVehicleData({ ...parsedData, vin } as Partial<VehicleState>);
+  // Track "last updated" based on key telemetry fields — not every MQTT status message,
+  // but meaningful data that users see on the dashboard.
+  const KEY_FIELDS: (keyof VehicleState)[] = [
+    "battery_level", "range", "odometer", "speed",
+    "charging_status", "latitude", "longitude",
+    "tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr",
+    "door_fl", "door_fr", "door_rl", "door_rr", "trunk_status", "hood_status",
+    "central_lock_status", "ignition_status",
+  ];
+  const dataWithTimestamp = { ...parsedData, vin } as Partial<VehicleState>;
+  const hasKeyData = KEY_FIELDS.some((f) => parsedData[f] !== undefined && parsedData[f] !== null);
+  if (hasKeyData) {
+    dataWithTimestamp.odoLastReceived = Date.now();
+    dataWithTimestamp.dataSource = "live";
+  }
+
+  updateVehicleData(dataWithTimestamp);
+
+  // Persist telemetry to localStorage for offline/reload cache
+  const afterUpdate = vehicleStore.get();
+  if (afterUpdate.vin === vin) {
+    saveTelemetryToStorage(vin, afterUpdate);
+  }
 
   // Clear loading state once first MQTT data arrives for the active vehicle.
-  const current = vehicleStore.get();
+  const current = afterUpdate;
   if (current.isRefreshing && current.vin === vin) {
     vehicleStore.setKey("isRefreshing" as any, false);
   }
