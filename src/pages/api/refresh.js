@@ -119,6 +119,10 @@ export const POST = async ({ request, cookies, locals }) => {
     }
 
     cookies.set("access_token", data.access_token, cookieOptions);
+    // Store id_token for Cognito OIDC validation (same as APK)
+    if (data.id_token) {
+      cookies.set("id_token", data.id_token, cookieOptions);
+    }
     if (data.refresh_token) {
       cookies.set("refresh_token", data.refresh_token, cookieOptions);
     }

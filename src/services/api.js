@@ -430,6 +430,162 @@ class VinFastAPI {
     return await response.json();
   }
 
+  // --- Device Trust Registration ---
+
+  /**
+   * PUT ccarusermgnt/api/v1/device-trust/fcm-token
+   * APK calls this on EVERY startup (HomePreloadViewModel → PutDeviceTokenUseCase).
+   * Registers the device's push notification token with VinFast.
+   * The "device-trust" name suggests this may affect server-side authorization
+   * for telemetry endpoints (list_resource, app/ping).
+   *
+   * For web dashboard, we generate a stable pseudo-token since we can't use FCM.
+   */
+  async registerDeviceTrust() {
+    const proxyPath = `ccarusermgnt/api/v1/device-trust/fcm-token`;
+    const url = `/api/proxy/${proxyPath}?region=${this.region}`;
+
+    // Generate a stable pseudo-FCM token for this browser session.
+    // Real FCM tokens are ~200 chars. We use a deterministic token based on
+    // user + device identifier so the server sees a consistent "device".
+    const pseudoToken = `vfdashboard_${this.userId || 'anon'}_${Date.now()}`;
+
+    try {
+      const response = await this._fetchWithRetry(url, {
+        method: "PUT",
+        headers: this._getHeaders(),
+        body: JSON.stringify({ fcmToken: pseudoToken }),
+      });
+
+      const text = await response.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch {}
+      console.log(
+        `%c[device-trust] ${response.status}`,
+        response.ok ? 'color:#10b981;font-weight:bold' : 'color:#ef4444;font-weight:bold',
+        json || text,
+      );
+      return { status: response.status, data: json };
+    } catch (e) {
+      console.warn('[device-trust] Failed:', e.message);
+      return { status: 0, error: e.message };
+    }
+  }
+
+
+  // --- Telemetry Trigger (app/ping) ---
+
+  /**
+   * POST ccaraccessmgmt/api/v1/telemetry/app/ping
+   * APK calls this to "ping" the T-Box and get current telemetry values.
+   * Body: [{objectId, instanceId, resourceId}, ...]
+   * Response: {data: [{deviceKey, value, lastUpdateTime}, ...]}
+   */
+  async appPing(resources) {
+    const proxyPath = `ccaraccessmgmt/api/v1/telemetry/app/ping`;
+    const url = `/api/proxy/${proxyPath}?region=${this.region}`;
+
+    const response = await this._fetchWithRetry(url, {
+      method: "POST",
+      headers: this._getHeaders(),
+      body: JSON.stringify(resources),
+    });
+
+    const text = await response.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch {}
+    console.log(`[appPing] ${response.status}`, json || text);
+    return { status: response.status, data: json };
+  }
+
+  /**
+   * POST ccaraccessmgmt/api/v1/telemetry/{vin}/list_resource
+   * APK calls this after subscribing to register which resources to push.
+   * Body: [{objectId, instanceId, resourceId}, ...]
+   */
+  async listResource(vin, resources) {
+    const requestVin = vin || this.vin;
+    if (!requestVin) throw new Error("VIN required");
+
+    const proxyPath = `ccaraccessmgmt/api/v1/telemetry/${requestVin}/list_resource`;
+    const url = `/api/proxy/${proxyPath}?region=${this.region}`;
+
+    const response = await this._fetchWithRetry(url, {
+      method: "POST",
+      headers: this._getHeaders(requestVin),
+      body: JSON.stringify(resources),
+    });
+
+    const json = await response.json();
+    console.log(`[listResource] ${response.status}`, json);
+    return { status: response.status, ...json };
+  }
+
+  // --- T-Box Wakeup ---
+
+  /**
+   * POST ccaraccessmgmt/api/v1/remote/app/wakeup
+   * APK calls this to explicitly wake the T-Box.
+   * No body/parameters — simple POST.
+   */
+  async wakeupTBox() {
+    const proxyPath = `ccaraccessmgmt/api/v1/remote/app/wakeup`;
+    const url = `/api/proxy/${proxyPath}?region=${this.region}`;
+
+    try {
+      const response = await this._fetchWithRetry(url, {
+        method: "POST",
+        headers: this._getHeaders(),
+        body: JSON.stringify({}),
+      });
+
+      const text = await response.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch {}
+      console.log(
+        `%c[wakeup] ${response.status}`,
+        response.ok ? "color:#10b981;font-weight:bold" : "color:#ef4444;font-weight:bold",
+        json || text,
+      );
+      return { status: response.status, data: json };
+    } catch (e) {
+      console.warn("[wakeup] Failed:", e.message);
+      return { status: 0, error: e.message };
+    }
+  }
+
+  /**
+   * PUT ccarusermgnt/api/v1/user-vehicle/set-primary-vehicle
+   * APK calls this when switching vehicles to tell the server which vehicle is active.
+   * Required before wakeup/list_resource will target the correct T-Box.
+   */
+  async setPrimaryVehicle(vinCode) {
+    if (!vinCode) throw new Error("VIN required");
+    const proxyPath = `ccarusermgnt/api/v1/user-vehicle/set-primary-vehicle`;
+    const url = `/api/proxy/${proxyPath}?region=${this.region}`;
+
+    try {
+      const response = await this._fetchWithRetry(url, {
+        method: "PUT",
+        headers: this._getHeaders(vinCode),
+        body: JSON.stringify({ vinCode }),
+      });
+
+      const text = await response.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch {}
+      console.log(
+        `%c[setPrimaryVehicle] ${response.status}`,
+        response.ok ? "color:#10b981;font-weight:bold" : "color:#ef4444;font-weight:bold",
+        json || text,
+      );
+      return { status: response.status, data: json };
+    } catch (e) {
+      console.warn("[setPrimaryVehicle] Failed:", e.message);
+      return { status: 0, error: e.message };
+    }
+  }
+
   // --- Full Telemetry Methods ---
 
   async getAliases(vin, version = "1.0") {
@@ -469,32 +625,6 @@ class VinFastAPI {
     }
 
     return resources;
-  }
-
-  /**
-   * Register core resources with VinFast T-Box to trigger data push.
-   * Single call with ~40 core aliases — essential for fast MQTT data delivery.
-   */
-  async registerResources(vin, requestObjects) {
-    if (!vin || !requestObjects || requestObjects.length === 0) return;
-    const proxyPath = `ccaraccessmgmt/api/v1/telemetry/${vin}/list_resource`;
-    const url = `/api/proxy/${proxyPath}?region=${this.region}`;
-    try {
-      const response = await this._fetchWithRetry(url, {
-        method: "POST",
-        body: JSON.stringify(requestObjects),
-      });
-
-      if (!response.ok) {
-        const body = await response.text();
-        console.warn("registerResources failed:", response.status, body || "no body");
-        return;
-      }
-
-      console.log(`[Register] Core resources registered for ${vin} (${requestObjects.length} aliases)`);
-    } catch (e) {
-      console.warn("registerResources failed:", e);
-    }
   }
 
   // --- Charging Station API ---

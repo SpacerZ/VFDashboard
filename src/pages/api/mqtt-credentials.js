@@ -33,32 +33,91 @@ export const GET = async ({ cookies }) => {
     });
   }
 
+  // APK uses id_token (NOT access_token) for Cognito Federated Identities.
+  // Cognito OIDC validation requires the id_token JWT whose "aud" matches
+  // the Auth0 client_id registered as an OIDC provider in Cognito.
+  // The access_token has aud = API URL, which Cognito may reject or map
+  // to unauthenticated credentials with limited IoT policy.
+  const idToken = cookies.get("id_token")?.value;
+
   const regionKey = cookies.get("vf_region")?.value || DEFAULT_REGION;
   const mqttConfig = MQTT_CONFIG[regionKey] || MQTT_CONFIG.vn;
   const regionConfig = REGIONS[regionKey] || REGIONS[DEFAULT_REGION];
 
   try {
-    // Step 1: GetId — exchange Auth0 token for Cognito Identity ID
     const loginProvider = mqttConfig.cognitoLoginProvider || regionConfig.auth0_domain;
-    const logins = { [loginProvider]: accessToken };
 
-    const getIdResult = await cognitoRequest(mqttConfig.region, "GetId", {
-      IdentityPoolId: mqttConfig.cognitoPoolId,
-      Logins: logins,
-    });
+    // Try id_token first (preferred, like APK). Fall back to access_token if id_token fails.
+    let cognitoToken = idToken || accessToken;
+    let tokenType = idToken ? "id_token" : "access_token";
 
-    const identityId = getIdResult.IdentityId;
+    // Diagnostic: decode JWT claims to compare with APK's id_token
+    if (cognitoToken) {
+      try {
+        const parts = cognitoToken.split(".");
+        if (parts.length === 3) {
+          const claims = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+          console.log(`[mqtt-credentials] JWT claims (${tokenType}):`, JSON.stringify({
+            iss: claims.iss,
+            sub: claims.sub,
+            aud: claims.aud,
+            azp: claims.azp,
+            scope: claims.scope,
+            exp: claims.exp,
+            iat: claims.iat,
+          }, null, 2));
+        }
+      } catch (e) {
+        console.warn("[mqtt-credentials] Failed to decode JWT:", e.message);
+      }
+    }
+    let logins = { [loginProvider]: cognitoToken };
+    let identityId;
+    let creds;
+
+    try {
+      // Step 1: GetId — exchange token for Cognito Identity ID
+      const getIdResult = await cognitoRequest(mqttConfig.region, "GetId", {
+        IdentityPoolId: mqttConfig.cognitoPoolId,
+        Logins: logins,
+      });
+      identityId = getIdResult.IdentityId;
+
+      // Step 2: GetCredentialsForIdentity — get temporary AWS credentials
+      const credsResult = await cognitoRequest(mqttConfig.region, "GetCredentialsForIdentity", {
+        IdentityId: identityId,
+        Logins: logins,
+      });
+      creds = credsResult.Credentials;
+      console.log(`[mqtt-credentials] Cognito OK with ${tokenType}, identity: ${identityId}`);
+    } catch (cognitoErr) {
+      // If id_token failed and we have access_token as fallback, retry
+      if (tokenType === "id_token" && accessToken && accessToken !== idToken) {
+        console.warn(`[mqtt-credentials] ${tokenType} failed: ${cognitoErr.message} — retrying with access_token`);
+        cognitoToken = accessToken;
+        tokenType = "access_token (fallback)";
+        logins = { [loginProvider]: cognitoToken };
+
+        const getIdResult = await cognitoRequest(mqttConfig.region, "GetId", {
+          IdentityPoolId: mqttConfig.cognitoPoolId,
+          Logins: logins,
+        });
+        identityId = getIdResult.IdentityId;
+
+        const credsResult = await cognitoRequest(mqttConfig.region, "GetCredentialsForIdentity", {
+          IdentityId: identityId,
+          Logins: logins,
+        });
+        creds = credsResult.Credentials;
+        console.log(`[mqtt-credentials] Cognito OK with ${tokenType}, identity: ${identityId}`);
+      } else {
+        throw cognitoErr;
+      }
+    }
+
     if (!identityId) {
       throw new Error("No IdentityId returned from Cognito GetId");
     }
-
-    // Step 2: GetCredentialsForIdentity — get temporary AWS credentials
-    const credsResult = await cognitoRequest(mqttConfig.region, "GetCredentialsForIdentity", {
-      IdentityId: identityId,
-      Logins: logins,
-    });
-
-    const creds = credsResult.Credentials;
     if (!creds) {
       throw new Error("No Credentials returned from Cognito");
     }
@@ -94,6 +153,7 @@ export const GET = async ({ cookies }) => {
       sessionToken: creds.SessionToken,
       expiration: creds.Expiration,
       identityId,
+      tokenType,
       policyAttached: attachPolicyResult.attached,
       policyMessage: attachPolicyResult.message,
       endpoint: mqttConfig.endpoint,
@@ -151,6 +211,8 @@ async function attachPolicy(regionConfig, accessToken, identityId) {
         payload = null;
       }
     }
+
+    console.log(`[attach-policy] ${response.status} for identity ${identityId}:`, text?.substring(0, 300));
 
     if (!response.ok) {
       return {

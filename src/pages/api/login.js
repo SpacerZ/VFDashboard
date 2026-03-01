@@ -46,7 +46,14 @@ export const POST = async ({ request, cookies, locals }) => {
       client_id: regionConfig.auth0_client_id,
       audience: regionConfig.auth0_audience,
       grant_type: "password",
-      scope: "offline_access openid profile email",
+      // APK scope includes read:current_user + update:current_user_metadata
+      // These extra scopes may add claims to the id_token that Cognito uses
+      // to assign the correct IAM role with full IoT permissions.
+      scope: "offline_access openid profile email read:current_user update:current_user_metadata",
+      // APK sends explicit Auth0 database connection name.
+      // Without this, Auth0 may route to a different connection,
+      // producing an id_token with different claims/sub format.
+      connection: "Username-Password-Authentication",
       username: email,
       password,
     };
@@ -126,6 +133,13 @@ export const POST = async ({ request, cookies, locals }) => {
     }
 
     cookies.set("access_token", data.access_token, cookieOptions);
+    // APK uses id_token (NOT access_token) for Cognito Federated Identities.
+    // Cognito OIDC validation requires the id_token JWT (aud = client_id).
+    // The access_token has aud = API URL, which Cognito may reject silently,
+    // falling back to unauthenticated credentials with limited IoT policy.
+    if (data.id_token) {
+      cookies.set("id_token", data.id_token, cookieOptions);
+    }
     if (data.refresh_token) {
       cookies.set("refresh_token", data.refresh_token, cookieOptions);
     }

@@ -6,12 +6,14 @@ import crypto from "crypto";
 // Restrict proxy usage to known VinFast API namespaces used by the dashboard.
 const ALLOWED_PATH_PREFIXES = [
   "ccarusermgnt/api/v1/user-vehicle",
+  "ccarusermgnt/api/v1/device-trust",
   "ccarusermgnt/api/v1/service-history",
   "ccarusermgnt/api/v1/service-appointments",
   "ccarbookingservice/api/v1/c-app/appointment/",
   "ccarbookingservice/api/v1/c-app/showroom/",
   "modelmgmt/api/v2/vehicle-model/",
   "ccaraccessmgmt/api/v1/telemetry/",
+  "ccaraccessmgmt/api/v1/remote/app/wakeup",
   "ccarcharging/api/v1/stations/",
   "ccarcharging/api/v1/charging-sessions/search",
 ];
@@ -223,6 +225,11 @@ export const ALL = async ({ request, params, cookies, locals }) => {
     console.log(
       `[Proxy] Signed ${request.method} /${apiPath} with X-HASH + X-HASH-2`,
     );
+    console.log(`[Proxy DEBUG] timestamp=${xTimestamp}`);
+    console.log(`[Proxy DEBUG] X-HASH=${xHash}`);
+    console.log(`[Proxy DEBUG] X-HASH-2=${xHash2}`);
+    console.log(`[Proxy DEBUG] vin=${vinHeader || 'none'}, player=${playerHeader || 'none'}`);
+    console.log(`[Proxy DEBUG] All headers:`, JSON.stringify(proxyHeaders, null, 2));
   }
 
   if (vinHeader) proxyHeaders["X-Vin-Code"] = vinHeader;
@@ -339,6 +346,7 @@ export const ALL = async ({ request, params, cookies, locals }) => {
   );
   if (lastResponse.status >= 400) {
     console.log(`[Proxy] Error body: ${lastData.substring(0, 500)}`);
+    console.log(`[Proxy DEBUG] Response headers:`, JSON.stringify(Object.fromEntries(lastResponse.headers.entries()), null, 2));
   }
 
   return new Response(lastData, {

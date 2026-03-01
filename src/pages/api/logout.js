@@ -11,6 +11,7 @@ export const POST = async ({ request, cookies }) => {
   };
 
   cookies.set("access_token", "", clearOpts);
+  cookies.set("id_token", "", clearOpts);
   cookies.set("refresh_token", "", clearOpts);
   cookies.set("vf_region", "", { path: "/", maxAge: 0 });
 
