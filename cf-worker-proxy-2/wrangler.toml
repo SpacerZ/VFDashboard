@@ -1,6 +1,0 @@
-name = "vf-proxy-worker-2"
-main = "src/index.js"
-compatibility_date = "2024-12-01"
-
-[vars]
-VINFAST_XHASH_SECRET = "Vinfast@2025"
